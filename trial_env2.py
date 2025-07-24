@@ -59,11 +59,13 @@ class ConcatImageEnv(gym.Env):
 
         self.last_action = None
         self.last_reward = None
+
+        if not hasattr(self, "predictions"):
+            print("Precomputing CNN predictions")
+            self.predictions = self._get_batchsequence_predictions()
         
     def reset(self, seed=None, options=None):
-        try:            
-            predictions = self._get_batchsequence_predictions() # get all predictions
-            
+        try:                        
             super().reset(seed=seed)
             self.current_step = 0
             
@@ -79,7 +81,7 @@ class ConcatImageEnv(gym.Env):
             # obs = self._get_cnn_prediction(obs) 
 
             # for all observations i.e. multiple trials with its own N steps
-            obs = predictions[self.current_trial, self.current_step]
+            obs = self.predictions[self.current_trial, self.current_step]
 
             info = {}
             return obs, info
@@ -149,7 +151,8 @@ class ConcatImageEnv(gym.Env):
         for all steps of a trial 
         """
         # Preprocess all 10 images of all trials at once
-        self.batch_images = self.observations.view(-1, 3, 224, 224)  # Shape: (10, 3, 224, 224)
+        # self.batch_images = self.observations.view(-1, 3, 224, 224)  # Shape: (10, 3, 224, 224)
+        self.batch_images = self.observations
 
         # Model to eval mode and inference only
         self.cnn_model.eval()

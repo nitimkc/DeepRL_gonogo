@@ -4,7 +4,7 @@ import logging
 import argparse
 
 import gymnasium as gym
-from stable_baselines3.common.vec_env import DummyVecEnv, VecMonitor
+from stable_baselines3.common.vec_env import Monitor
 from stable_baselines3 import PPO
 
 import random
@@ -14,7 +14,7 @@ import numpy as np
 import torch
 from cnn_model import VGG_finetuned
 from trial_env2 import ConcatImageEnv, FeatureExtractor, CustomCNNPolicy
-# from stable_baselines3.common.vec_env import Monitor
+
 
 log = logging.getLogger("readability.readability")
 log.setLevel('WARNING')
@@ -98,49 +98,40 @@ if __name__ == '__main__':
     # set up custom environment
     print('\n Setting custom environment')
     # ====================================
-    # CNN
+    # CNN Policy setup
     vgg = VGG_finetuned(num_classes=2)
     vgg.load_state_dict(torch.load(CNN_PATH, weights_only=True)) # inplace=True
 
-    # wrap env and cnn
-    env = DummyVecEnv([lambda: ConcatImageEnv(observations=observations, 
-                                              input_dim=obs_shape, 
-                                              cnn_model=vgg,
-                                              targets=targets
-                                              )]) # for non-image
+    policy_kwargs = {
+        "features_extractor_class": FeatureExtractor,
+        "features_extractor_kwargs": {
+            "model": vgg,  # Your fine-tuned model
+        }
+    }
+
+    # for custom CNN with feature extraction
+    gym.envs.registration.register(
+        id="ConcatImageEnv-v0",
+        entry_point=concatImageEnv,
+    )
+    env = gym.make("ConcatImageEnv-v0", observations=observations, input_dim=obs_shape, cnn_model=vgg)        
     print("Environment loaded:", env)
-    env = VecMonitor(env)
+    env = Monitor(env)
+    env.reset() # Reset the environment to start a new episode
 
     # train with PPO
-    model = PPO("MlpPolicy", env, verbose=1)
-    model = PPO("MlpPolicy", env, verbose=1, n_steps=256)
+    print('\n training with PPO')
+    # ====================================
+    model = PPO(
+        policy=CustomCNNPolicy,
+        env=env,
+        policy_kwargs=policy_kwargs,  # Pass fine-tuned VGG here
+        verbose=1,
+    )
 
-    model.learn(total_timesteps=100_000)
-    # model.learn(total_timesteps=2048, log_interval=1)
+    # model.learn(total_timesteps=100_000, log_interval=1)
+    model.learn(total_timesteps=10_000, log_interval=1)
     print("Training complete.")
-
-    # # for custom CNN with feature extraction
-    # gym.envs.registration.register(
-    #     id="ConcatImageEnv-v0",
-    #     entry_point=concatImageEnv,
-    # )
-    # env = gym.make("ConcatImageEnv-v0", observations=observations, input_dim=obs_shape, cnn_model=vgg)        
-    # print("Environment loaded:", env)
-    # env.reset() # Reset the environment to start a new episode
-
-    # policy_kwargs = {
-    #     "features_extractor_class": FeatureExtractor,
-    #     "features_extractor_kwargs": {
-    #         "model": vgg,  # Your fine-tuned model
-    #     }
-    # }
-
-    # model = PPO(
-    #     policy=CustomCNNPolicy,
-    #     env=env,
-    #     policy_kwargs=policy_kwargs,  # Pass fine-tuned VGG here
-    #     verbose=1,
-    # )
 
     print('\nsave and evaluate')
     # ==========================
