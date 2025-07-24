@@ -48,6 +48,4 @@ for img in img_fnames:
 
     to_path = SAVEPATH.joinpath(f"img_{fimg1}_{fimg2}_noise{N_RUN}.png")
     print(to_path)
-    # plt.imshow(concat_img, cmap='gray')
-    plt.axis('off')
-    plt.savefig(to_path)                  # save concatnated images
+    cv2.imwrite(to_path, concat_img)
