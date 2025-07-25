@@ -9,8 +9,8 @@ import argparse
 
 from reader import ImageReader
 from loader import ImageLoader, get_sampling_weights
-from model import vgg_finetuned, seed_worker
-from trainer import ModelTrainer
+from cnn_model import VGG_finetuned, seed_worker
+from vgg_trainer import ModelTrainer
 
 from collections import Counter
 import numpy as np
@@ -36,7 +36,7 @@ with open(CONFIG_FILE, "r") as f:
     CONFIG = yaml.safe_load(f)
 print(CONFIG)
 
-SAVEPATH = ROOT.joinpath(f"models")
+SAVEPATH = ROOT.joinpath(f"cnn_models")
 SAVEPATH.mkdir(parents=True, exist_ok=True)
 
 fileids = [i for i in DATA.glob('*.png')]
@@ -57,7 +57,7 @@ if __name__ == '__main__':
     print('\ngetting data loaders for training')
     # ==========================================
     data_config = CONFIG['DATA']
-    train_config = CONFIG['TRAINING']
+    train_config = CONFIG['TRAINING_CNN']
     transform = T.Compose([T.ToPILImage(),
                            T.Resize((224, 224)),
                            T.ToTensor(),T.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
@@ -124,7 +124,7 @@ if __name__ == '__main__':
     print('\nfinetune vgg on custom data')
     # ====================================
     # set seed for training 
-    model = vgg_finetuned(num_classes=len(item_count))
+    model = VGG_finetuned(num_classes=len(item_count))
     # trainer = ModelTrainer(model, train_config, train_dataloader, valid_dataloader)
     model_name = f"vgg16_finetuned{train_config['MODEL_NAME']}.pth"
     trainer = ModelTrainer(model, train_config, train_dataloader, valid_dataloader, savepath=SAVEPATH.joinpath(model_name))

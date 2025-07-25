@@ -15,10 +15,10 @@ parser.add_argument("--run_no", type=str, help="The number of run for adding noi
 args = parser.parse_args()
 
 ROOT = Path(args.root)
-DATA = ROOT.joinpath(f"data")
+DATA = ROOT.joinpath(f"data/images")
 DATA.mkdir(parents=True, exist_ok=True)
 
-SAVEPATH = DATA.joinpath(f"concatdata")
+SAVEPATH = DATA.parent.joinpath(f"concatimg")
 SAVEPATH.mkdir(parents=True, exist_ok=True)
 
 # concat two images

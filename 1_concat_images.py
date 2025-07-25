@@ -14,12 +14,12 @@ parser.add_argument("--root", type=str, help="root directory where data and eval
 args = parser.parse_args()
 
 ROOT = Path(args.root)
-DATA = ROOT.joinpath(f"data")
+DATA = ROOT.joinpath(f"data/images")
 DATA.mkdir(parents=True, exist_ok=True)
 
-SAVEPATH = DATA.joinpath(f"concatdata")
+SAVEPATH = DATA.parent.joinpath(f"concatimg")
 SAVEPATH.mkdir(parents=True, exist_ok=True)
-
+ 
 # concat two images
 img_fnames = [i for i in DATA.glob('*.png')]
 # print(img_fnames[:2])

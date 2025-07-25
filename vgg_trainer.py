@@ -1,11 +1,12 @@
 
+import time
 import torch
 import torch.nn as nn
 import torch.optim as optim
 from torchvision.models import vgg16, VGG16_Weights
 from torch.utils.data import DataLoader
 from sklearn.metrics import f1_score, confusion_matrix, classification_report
-from model import EarlyStopping, set_seed
+from cnn_model import EarlyStopping, set_seed
 from tqdm import tqdm
 
 # hyperparams = [CONFIG['MODEL'], CONFIG['NUM_CLASSES'], CONFIG['BATCH_SIZE'], CONFIG['NUM_EPOCHS'], CONFIG['LEARNING_RATE']]
@@ -31,7 +32,7 @@ class ModelTrainer(object):
         
         self.criterion = nn.CrossEntropyLoss()
         self.optimizer = optim.Adam(self.model.parameters(), lr=self.learning_rate)
-        self.early_stopping = EarlyStopping(patience=5, delta=0.01, verbose=True)
+        self.early_stopping = EarlyStopping(patience=5, delta=0.001, verbose=True)
 
         self.savepath = savepath
 
@@ -40,6 +41,7 @@ class ModelTrainer(object):
         # out_dir = self.modelpath.joinpath(f"{self.model_name}-{self._lang_to_train}-finetuned")
         # print(f"Model to be saved in {out_dir}")
         
+        start = time.time()
         for epoch in range(self.n_epochs):
             # training loop
             with tqdm(self._train_dataset, unit="batch", bar_format='\n{l_bar}{bar:20}{r_bar}') as tepoch:
@@ -96,18 +98,20 @@ class ModelTrainer(object):
                 if self.early_stopping.stop_training:
                     print(f"Early stopping at epoch {epoch}")
                     break
-
-        # add metrics    
-        y = y.cpu().numpy()  
-        y_hat = y_hat.cpu().numpy()
-        print("\nConfusion Matrix (final):")
-        conf_matrix = confusion_matrix(y, y_hat)
-        print(conf_matrix)
-        print("\nClassification Report:")
-        print(classification_report(y, y_hat))
-        # print(f"Macro F1-score: {round(f1_score(y, y_hat, average='macro'),2)}")
-        # print(f"Weighted F1-score: {round(f1_score(y, y_hat, average='weighted'),2)}")
-        print("\n")
+        
+            # add metrics    
+            y = y.cpu().numpy()  
+            y_hat = y_hat.cpu().numpy()
+            print("\nConfusion Matrix (final):")
+            conf_matrix = confusion_matrix(y, y_hat)
+            print(conf_matrix)
+            print("\nClassification Report:")
+            print(classification_report(y, y_hat))
+            # print(f"Macro F1-score: {round(f1_score(y, y_hat, average='macro'),2)}")
+            # print(f"Weighted F1-score: {round(f1_score(y, y_hat, average='weighted'),2)}")
+            print("\n")
+        end = time.time()
+        print(f"Total fine-tuning time: {(end - start)/60:.2f} minutes.")
 
         torch.save(self.model.state_dict(), self.savepath)
         # print(f"free space by deleting: {self.savepath}")

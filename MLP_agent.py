@@ -1,31 +1,37 @@
+import time
 from pathlib import Path
 import yaml 
 import logging
 import argparse
 
-import gymnasium as gym
+import gymnasium as gym 
 from stable_baselines3.common.vec_env import DummyVecEnv, VecMonitor
 from stable_baselines3 import PPO
 
 import random
 import cv2
 import numpy as np
+import pandas as pd
 
 import torch
+from PIL import Image
+from torchvision import transforms
 from cnn_model import VGG_finetuned
-from trial_env2 import ConcatImageEnv
+# from trial_env2 import ConcatImageEnv, PrintCallback
+from trial_env3 import ConcatImageEnv, PrintCallback
 
 log = logging.getLogger("readability.readability")
 log.setLevel('WARNING')
 
 print('creating parser')
-parser = argparse.ArgumentParser(description="DESCCRIPTION HERE")
+parser = argparse.ArgumentParser(description="DESCRIPTION HERE")
 parser.add_argument("--root", type=str, help="root directory where data and eval folders exists.")
 parser.add_argument("--config_file", type=str, help="File containing run configurations.")
 args = parser.parse_args()
 
 ROOT = Path(args.root)
 DATAPATH = ROOT.joinpath("data")
+IMGPATH = DATAPATH.joinpath("images_lowres")
 CONFIG_FILE = ROOT.joinpath(args.config_file)
 with open(CONFIG_FILE, "r") as f:
     CONFIG = yaml.safe_load(f)
@@ -48,52 +54,63 @@ if __name__ == '__main__':
     session_images_nums = ['075', '106', '073', '045', '035', '031', '000', '054'] 
     img_fnames = [i for i in DATAPATH.glob("*.png")]
     img_fnames = [i for i in img_fnames if i.name.split('.')[0][2:] in session_images_nums]
-    N_CLASSES = len(img_fnames)
-    N_SAME = train_config["N_TRIALS"] // 2
-    N_DIFF = train_config["N_TRIALS"] // 2
-    N_TIMESTEPS = train_config['N_TIMESTEPS']
+    session_data = pd.read_csv(DATAPATH.joinpath(f"session/{train_config['TRIALS']}"))
+    session_data = session_data.iloc[:train_config['N_TRIALS'],:]
 
-    observations = []
-    targets = []
+    N_TRIALS = len(session_data)
+    # N_TIMESTEPS varies each trial, make a numpy array of the num_time_bins column in session_data
+    N_TIMESTEPS = session_data['num_time_bins'].to_numpy().astype(int)
+    MAX_TIMESTEPS = session_data['num_time_bins'].max()
+    # Check the shape of N_TIMESTEPS
+    print(f"N_TIMESTEPS shape: {N_TIMESTEPS.shape}")
+    print(f"First few values of N_TIMESTEPS: {N_TIMESTEPS[:10]}")
+    print(f"Maximum number of steps in a trials: {MAX_TIMESTEPS}")
 
-    # Same image trials i.e. concat same images <<<changed to horizontal stack>>>
-    for _ in range(N_SAME):
-        cls = random.choice(range(N_CLASSES))
-        # print(cls)
-        img = cv2.imread(img_fnames[cls])
-        obs = np.concatenate([img, img], axis=1)  # NOT vertical stack
-        tiled_obs = np.tile(obs[np.newaxis, ...], (N_TIMESTEPS, 1, 1, 1))  # Tile the image for each timestep
-        # print(tiled_obs.shape)
+    # CHANGE_TIME = session_data['change_time_bin'].to_numpy().astype(int)
+    # TARGET_TIME = session_data['response_time_bin'].to_numpy()
+    CHANGE_TIME = pd.Series(session_data['change_time_bin'], dtype="Int64")
+    TARGET_TIME = pd.Series(session_data['response_time_bin'], dtype="Int64")
+    print(f"CHANGE_TIME shape: {CHANGE_TIME.shape}")
+    print(f"TARGET_TIME shape: {TARGET_TIME.shape}")
 
-        observations.append(tiled_obs)
-        targets.append([0] * N_TIMESTEPS)  # Target is 0 for all timesteps
-        # plt.imshow(obs, cmap="gray")
-    print(f"shape of input image: {img.shape}")
-    print(f"shape of input observation: {tiled_obs.shape}")
-    print(f"No. of input observations: {len(observations)}")
+
+    unique_image_paths = [IMGPATH.joinpath(f"{i}.png") for i in session_data['initial_image_name'].unique()]
+    one_image =  np.array(Image.open(unique_image_paths[0]))
+    IMG_SHAPE = one_image.shape
+    print(f"Shape of image: {IMG_SHAPE}")  
+
+    # load img index instead of image as tensor will be too large to pass
+    img_path_index = {img_path.stem: idx for idx, img_path in enumerate(unique_image_paths)}
+    print(img_path_index)
+    N_IMAGES = len(img_path_index)
+    print(f"No. of unique images: {N_IMAGES}")
     
-    # Change image trials
-    for _ in range(N_DIFF):
-        c1, c2 = random.sample(range(N_CLASSES), 2)
-        # print(c1, c2)
-        img1 = cv2.imread(img_fnames[c1])
-        img2 = cv2.imread(img_fnames[c2])
-        obs = np.concatenate([img1, img1], axis=1)  # Initially concatenate c1 and c1 HORIZONTALLY
-        tiled_obs = np.tile(obs[np.newaxis, ...], (N_TIMESTEPS, 1, 1, 1))  # Tile the image for each timestep
-        # print(tiled_obs.shape)
-        change_timestep = random.randint(5, N_TIMESTEPS)  # Randomly choose a timestep between 5 and 10
-        tiled_obs[change_timestep - 1] = np.concatenate([img1, img2], axis=1)  # Overwrite with c1 and c2 at the chosen timestep
-        tiled_obs[change_timestep:] = np.concatenate([img2, img2], axis=1)  # Overwrite with c2 and c2 after the chosen timestep
+    # initialize tensor to save images
+    # observations = torch.zeros((N_TRIALS, MAX_TIMESTEPS) + IMG_SHAPE, dtype=torch.uint8)
+    observations = torch.zeros((N_TRIALS, MAX_TIMESTEPS) + (1,), dtype=torch.uint8) # placeholder for IMG_SHAPE is IMG_PATH
+    observations = torch.full((N_TRIALS, MAX_TIMESTEPS, 1), -1, dtype=torch.int8)
+    print(f"Shape of tensor to store image: {observations.shape}")
 
-        target = [0] * N_TIMESTEPS  # Target is 0 for all timesteps
-        target[change_timestep - 1] = 1  # Set target to 1 at the change timestep
+    for t_idx, t in session_data.iterrows():
+      n_steps = N_TIMESTEPS[t_idx]
+      initial_imgidx, change_imgidx = img_path_index[t.loc['initial_image_name']], img_path_index[t.loc['change_image_name']]
+      change_step = int(t['change_time_bin'])  if t['is_change'] else None
+      for s in range(n_steps):
+        if t['is_change'] and change_step is not None and s >= change_step:
+          observations[t_idx, s] = change_imgidx
+        else:
+          observations[t_idx, s] =  initial_imgidx  
 
-        observations.append(tiled_obs)
-        targets.append(target)
-    obs_shape = tiled_obs[1].shape
-    print(f"No. of input observations: {len(observations)}")
+    targets = session_data['is_change']
+    # obs_shape = observations.shape[:-1] + IMG_SHAPE
+    obs_shape = observations.shape
+    print(f"No. of input observations: {len(observations)}  and targets: {len(targets)}")
     print(f"shape of input observation: {obs_shape}")
-    
+
+    # save for later
+    t_np = observations.squeeze(-1).cpu().numpy().astype(int)
+    np.savetxt(DATAPATH.joinpath('t_np.csv'), t_np, delimiter=',', fmt='%d')
+
     # set up custom environment
     print('\n Setting custom environment')
     # ====================================
@@ -104,36 +121,51 @@ if __name__ == '__main__':
     # wrap env and cnn
     env = DummyVecEnv([lambda: ConcatImageEnv(observations=observations, 
                                               input_dim=obs_shape, 
+                                              image_paths=unique_image_paths,
                                               cnn_model=vgg,
                                               targets=targets
-                                              )]) # for non-image
+                                              )]) # for non-image / image_idx
     print("Environment loaded:", env)
     # # to parallelize env process
     # from stable_baselines3.common.vec_env import SubprocVecEnv
     # env = SubprocVecEnv([make_env_fn for _ in range(num_envs)])
-
     env = VecMonitor(env)
 
     # train with PPO
-    print('\n training with PPO')
+    print('\nTraining with PPO')
     # ====================================
-    # model = PPO("MlpPolicy", env, verbose=1)
-    model = PPO("MlpPolicy", env, verbose=1, n_steps=256)
-    # model = PPO("MlpPolicy", env, verbose=1, n_steps=256, batch_size=64)
+    start = time.time()
+    model = PPO(
+      "MlpPolicy", 
+      env, 
+      batch_size=64,
+      n_steps=2048,
+      learning_rate=3e-4,
+      verbose=1,
+      device='cuda'
+      )
 
-    # model.learn(total_timesteps=100_000, log_interval=1)
-    model.learn(total_timesteps=10_000, log_interval=1)
+    callback = PrintCallback()
+    model.learn(total_timesteps=10_000, callback=callback)
+
+    end = time.time()
+    print(f"Time taken for 500 timesteps: {end - start:.2f} seconds")
     print("Training complete.")
 
     print('\nsave and evaluate')
     # ==========================
-    model.save(RL_PATH.joinpath("ppo_vgg_policy"))
+    fname = train_config['MODEL_NAME']
+    model.save(RL_PATH.joinpath(fname))
 
     # evaluate
     n_trials = train_config['N_TRIALS']
     obs = env.reset()
+    actions = []
     for _ in range(n_trials):
         action, _states = model.predict(obs, deterministic=True)
         obs, reward, terminated, info = env.step(action)
-        if done:
+        if terminated:
             obs = env.reset()
+    # Convert to numpy array and save
+    actions = np.array(actions)
+    np.save(RL_PATH.joinpath(f"{fname}_actions.npy", actions))

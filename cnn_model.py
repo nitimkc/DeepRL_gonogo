@@ -34,7 +34,7 @@ class VGG_finetuned(nn.Module):
 
 # set-up early stopping
 class EarlyStopping:
-    def __init__(self, patience=5, delta=0, verbose=False):
+    def __init__(self, patience=2, delta=0, verbose=False):
         self.patience = patience
         self.delta = delta
         self.verbose = verbose
